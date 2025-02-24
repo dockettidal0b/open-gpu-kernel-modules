@@ -30,6 +30,9 @@
 
 #include "nv-p2p.h"
 #include "rmp2pdefines.h"
+#include "nv-dma-segment.h"
+
+static nv_segment_mgr_t g_segment_mgr;
 
 typedef enum nv_p2p_page_table_type {
     NV_P2P_PAGE_TABLE_TYPE_NON_PERSISTENT = 0,
@@ -361,14 +364,23 @@ int nvidia_p2p_init_mapping(
     void *data
 )
 {
-    return -ENOTSUPP;
+    NV_STATUS status;
+    
+    // 初始化分段映射管理器
+    status = nv_segment_mgr_init(&g_segment_mgr);
+    if (status != NV_OK)
+        return nvidia_p2p_map_status(status);
+
+    return 0;
 }
 
 NV_EXPORT_SYMBOL(nvidia_p2p_init_mapping);
 
 int nvidia_p2p_destroy_mapping(uint64_t p2p_token)
 {
-    return -ENOTSUPP;
+    // 清理分段映射管理器
+    nv_segment_mgr_destroy(&g_segment_mgr);
+    return 0;
 }
 
 NV_EXPORT_SYMBOL(nvidia_p2p_destroy_mapping);
