@@ -365,13 +365,43 @@ int nvidia_p2p_init_mapping(
 )
 {
     NV_STATUS status;
-    
-    // 初始化分段映射管理器
-    status = nv_segment_mgr_init(&g_segment_mgr);
-    if (status != NV_OK)
-        return nvidia_p2p_map_status(status);
+    nvidia_stack_t *sp = NULL;
+    uint64_t fb_size = 0;
+    uint64_t bar1_size = 0;
+    int rc;
 
-    return 0;
+    // 获取堆栈
+    rc = nv_kmem_cache_alloc_stack(&sp);
+    if (rc != 0)
+        return -ENOMEM;
+
+    // 获取显存大小
+    nv_state_t *nv = NV_GET_NV_STATE(NV_GET_NVL_FROM_NV_STATE(&g_segment_mgr));
+    status = rm_get_gpu_fb_size(sp, nv, &fb_size);
+    if (status != NV_OK) {
+        rc = nvidia_p2p_map_status(status);
+        goto cleanup;
+    }
+
+    // 获取BAR1大小
+    status = rm_get_gpu_bar1_size(sp, nv, &bar1_size);
+    if (status != NV_OK) {
+        rc = nvidia_p2p_map_status(status);
+        goto cleanup;
+    }
+
+    // 初始化分段映射管理器
+    status = nv_segment_mgr_init(&g_segment_mgr, fb_size, bar1_size);
+    if (status != NV_OK) {
+        rc = nvidia_p2p_map_status(status);
+        goto cleanup;
+    }
+
+    rc = 0;
+
+cleanup:
+    nv_kmem_cache_free_stack(sp);
+    return rc;
 }
 
 NV_EXPORT_SYMBOL(nvidia_p2p_init_mapping);

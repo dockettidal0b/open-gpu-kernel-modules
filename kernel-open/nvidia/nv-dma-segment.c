@@ -7,14 +7,30 @@
 
 #include "nv-dma-segment.h"
 
+// 选择映射模式
+static nv_map_mode_t nv_select_map_mode(uint64_t fb_size, uint64_t bar1_size)
+{
+    // 如果BAR1空间足够大，使用静态映射
+    if (bar1_size >= fb_size)
+        return NV_MAP_MODE_STATIC;
+    
+    // 否则使用分段映射
+    return NV_MAP_MODE_SEGMENT;
+}
+
 // 初始化段管理器
-NV_STATUS nv_segment_mgr_init(nv_segment_mgr_t *mgr)
+NV_STATUS nv_segment_mgr_init(nv_segment_mgr_t *mgr, uint64_t fb_size, uint64_t bar1_size)
 {
     NV_STATUS status;
     uint32_t i;
 
-    if (!mgr)
+    if (!mgr || !fb_size || !bar1_size)
         return NV_ERR_INVALID_ARGUMENT;
+
+    // 初始化映射配置
+    mgr->config.fb_size = fb_size;
+    mgr->config.bar1_size = bar1_size;
+    mgr->config.mode = nv_select_map_mode(fb_size, bar1_size);
 
     // 分配段数组
     status = os_alloc_mem((void **)&mgr->segments,
@@ -49,6 +65,7 @@ NV_STATUS nv_segment_mgr_init(nv_segment_mgr_t *mgr)
     atomic64_set(&mgr->stats.cache_hits, 0);
     atomic64_set(&mgr->stats.cache_misses, 0);
     atomic64_set(&mgr->stats.map_failures, 0);
+    atomic64_set(&mgr->stats.mode_switches, 0);
 
     return NV_OK;
 }
@@ -149,6 +166,25 @@ static void nv_segment_update_access(nv_segment_mgr_t *mgr,
     NV_SPIN_UNLOCK(&mgr->cache.lock);
 }
 
+// 静态映射处理
+static NV_STATUS nv_static_map(nv_segment_mgr_t *mgr,
+                              uint64_t fb_addr,
+                              uint64_t size,
+                              uint64_t *bar1_addr)
+{
+    nv_state_t *nv = NV_GET_NV_STATE(NV_GET_NVL_FROM_NV_STATE(mgr));
+    nv_dma_device_t dma_dev = {{ 0 }};
+    void *priv = NULL;
+
+    dma_dev.dev = &nv->pci_dev->dev;
+    dma_dev.addressable_range.limit = nv->pci_dev->dma_mask;
+
+    // 直接进行BAR1映射
+    *bar1_addr = fb_addr;
+    return nv_dma_map_pages(&dma_dev, 1, bar1_addr, NV_TRUE,
+                           NV_MEMORY_UNCACHED, &priv);
+}
+
 // 映射新段
 NV_STATUS nv_segment_map(nv_segment_mgr_t *mgr,
                         uint64_t fb_addr,
@@ -160,6 +196,18 @@ NV_STATUS nv_segment_map(nv_segment_mgr_t *mgr,
 
     if (!mgr || !bar1_addr)
         return NV_ERR_INVALID_ARGUMENT;
+
+    // 检查是否需要切换映射模式
+    nv_map_mode_t current_mode = mgr->config.mode;
+    mgr->config.mode = nv_select_map_mode(mgr->config.fb_size, 
+                                         mgr->config.bar1_size);
+    
+    if (current_mode != mgr->config.mode)
+        atomic64_inc(&mgr->stats.mode_switches);
+
+    // 根据模式选择映射方式
+    if (mgr->config.mode == NV_MAP_MODE_STATIC)
+        return nv_static_map(mgr, fb_addr, size, bar1_addr);
 
     // 统计计数
     atomic64_inc(&mgr->stats.total_maps);

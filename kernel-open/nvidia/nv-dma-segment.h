@@ -18,6 +18,12 @@
 #define NV_SEG_MAX_COUNT  512            // 最大段数量
 #define NV_SEG_CACHE_SIZE 64             // LRU缓存大小
 
+// 映射模式定义
+typedef enum {
+    NV_MAP_MODE_STATIC = 0,     // 静态映射模式
+    NV_MAP_MODE_SEGMENT,        // 分段映射模式
+} nv_map_mode_t;
+
 // 段状态定义
 typedef enum {
     NV_SEG_STATE_FREE = 0,      // 空闲
@@ -25,6 +31,13 @@ typedef enum {
     NV_SEG_STATE_PENDING,       // 等待映射
     NV_SEG_STATE_ERROR          // 错误状态
 } nv_seg_state_t;
+
+// 映射配置
+typedef struct nv_map_config {
+    uint64_t    fb_size;        // 显存大小
+    uint64_t    bar1_size;      // BAR1大小
+    nv_map_mode_t mode;         // 映射模式
+} nv_map_config_t;
 
 // 段描述符
 typedef struct nv_segment {
@@ -54,16 +67,18 @@ typedef struct nv_segment_mgr {
     uint32_t           seg_count;      // 段数量
     nv_segment_cache_t cache;          // LRU缓存
     spinlock_t         lock;           // 管理器锁
+    nv_map_config_t    config;         // 映射配置
     struct {
         atomic64_t total_maps;        // 总映射次数
         atomic64_t cache_hits;        // 缓存命中
         atomic64_t cache_misses;      // 缓存未命中
         atomic64_t map_failures;      // 映射失败
+        atomic64_t mode_switches;     // 模式切换次数
     } stats;
 } nv_segment_mgr_t;
 
 // 接口函数声明
-NV_STATUS nv_segment_mgr_init(nv_segment_mgr_t *mgr);
+NV_STATUS nv_segment_mgr_init(nv_segment_mgr_t *mgr, uint64_t fb_size, uint64_t bar1_size);
 void nv_segment_mgr_destroy(nv_segment_mgr_t *mgr);
 NV_STATUS nv_segment_map(nv_segment_mgr_t *mgr, uint64_t fb_addr, 
                         uint64_t size, uint64_t *bar1_addr);

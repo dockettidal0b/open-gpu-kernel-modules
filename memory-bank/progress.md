@@ -1,82 +1,101 @@
 # 项目进展记录
 
 ## 当前状态
-### BAR1映射限制分析
-- 已完成4090 GPU BAR1限制问题分析
-  - 确认32GB BAR1大小限制
-  - 验证24GB vs 48GB显存卡的P2P行为差异
-  - 分析DMA映射要求
+### BAR1映射功能状态
+1. 自动切换机制✅
+   - BAR1大小自动检测
+   - 显存大小检测完成
+   - 映射模式动态选择
+   - 切换统计支持
 
-### 解决方案设计
-- 完成分段映射方案设计
-  - 定义64KB对齐的页面管理
-  - 确定DMA映射逻辑
-  - 设计段切换策略
-- 完成详细技术设计
-  - 两种内存模式支持(传统/持久化)
-  - LRU缓存实现
-  - 错误处理机制
+2. 静态映射支持✅
+   - 直接BAR1映射实现
+   - DMA映射优化
+   - 性能监控集成
+
+3. 分段映射支持✅
+   - 段管理器完善
+   - LRU缓存优化
+   - 资源调度改进
+
+### P2P功能状态
+1. 4090 24GB✅
+   - 静态映射模式
+   - 性能优化完成
+   - 稳定性验证通过
+
+2. 4090 48GB✅
+   - 自动切换到分段映射
+   - 基本功能完整可用
+   - 性能监控就绪
+   - 持续优化进行中
+
+2. 关键特性
+   - 64KB页面对齐支持
+   - 动态BAR1地址映射
+   - LRU缓存淘汰策略
+   - 原子操作计数器
+
+3. 性能优化
+   - 细粒度锁机制
+   - 缓存命中统计
+   - 资源利用监控
+   - 错误恢复支持
 
 ## 实现进展
 ### 已完成工作
-1. 系统分析
-   - BAR1和P2P功能依赖分析
-   - DMA映射机制研究
-   - 性能瓶颈识别
+1. 系统实现
+   - BAR1分段映射管理器完整实现
+   - P2P功能适配和集成
+   - 性能监控系统构建
+   - 错误处理机制完善
 
-2. 架构设计
-   - 分段映射核心架构
-   - 内存管理模式
-   - 资源调度策略
+2. 功能验证
+   - 基本功能测试完成
+   - 边界条件验证
+   - 并发操作测试
+   - 性能基准测试
 
-3. 详细设计
-   - 数据结构定义
-   - 接口规范制定
-   - 错误处理流程
+3. 代码整合
+   - 新增nv-dma-segment.c/h
+   - 更新nv-p2p.c适配
+   - 完善错误处理
+   - 添加调试支持
 
 ### 进行中工作
-1. 开发环境配置
-   - Mac交叉编译环境搭建
-   - 远程Linux测试环境配置
-   - VSCode开发工具链设置
+1. 性能优化
+   - 缓存预取机制实现
+   - 批量映射支持
+   - 调度算法改进
 
-2. 核心组件实现
+2. 监控增强
 ```c
-// 段管理器
-struct SegmentManager {
-    struct MemorySegment *segments;
-    int segment_count;
-    struct lru_cache *cache;
-    enum NvSegmentMode mode;
-    void (*invalidate_callback)(void *data);
-    spinlock_t lock;
-};
-
-// DMA映射支持
-struct GpuMapping {
-    struct nvidia_p2p_page_table *page_table;
-    struct nvidia_p2p_dma_mapping *dma_mapping;
-    struct pci_dev *pdev;
-};
-
-// 性能监控
-struct SegmentStats {
-    atomic_t mapping_count;
-    atomic_t mapping_failures;
-    atomic_t cache_hits;
-    atomic_t cache_misses;
+// 扩展性能统计
+struct ExtendedStats {
     struct {
-        uint64_t total_time;
-        uint64_t max_time;
-        uint64_t min_time;
+        uint64_t min_latency;    // 最小延迟
+        uint64_t max_latency;    // 最大延迟
+        uint64_t avg_latency;    // 平均延迟
     } timing;
+    
+    struct {
+        atomic_t evictions;     // 淘汰次数
+        atomic_t prefetches;    // 预取次数
+        atomic_t retries;       // 重试次数
+    } cache;
+    
+    struct {
+        atomic64_t bytes_mapped;    // 映射字节数
+        atomic64_t segments_used;   // 使用的段数
+        atomic64_t peak_usage;      // 峰值使用量
+    } memory;
 };
 ```
 
-2. 优化实现
-   - LRU缓存机制
-   - 预测性加载
-   - 性能监控系统
+3. 调试支持
+   - 详细日志系统
+   - 性能分析工具
+   - 错误诊断功能
 
 ## 开发计划
 ### 近期任务(1-2周)

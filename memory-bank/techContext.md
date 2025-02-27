@@ -42,24 +42,63 @@
    - 无法完整映射显存
    - 需要分段映射
 
-## 分段映射实现
-### 基础架构
-1. 页面映射
+## 映射模式管理
+### 自动切换实现
+1. 模式选择策略
 ```c
-// 64KB页面管理
-#define GPU_PAGE_SHIFT   16
-#define GPU_PAGE_SIZE    (1UL << GPU_PAGE_SHIFT)
-#define GPU_PAGE_MASK    (~(GPU_PAGE_SIZE - 1))
+// 映射模式选择
+static nv_map_mode_t nv_select_map_mode(uint64_t fb_size, uint64_t bar1_size)
+{
+    // 如果BAR1空间足够大，使用静态映射
+    if (bar1_size >= fb_size)
+        return NV_MAP_MODE_STATIC;
+    
+    // 否则使用分段映射
+    return NV_MAP_MODE_SEGMENT;
+}
+```
 
-// 页面地址计算
-static inline uint64_t calc_page_address(uint64_t addr) {
-    return addr & GPU_PAGE_MASK;
+2. 硬件检测
+```c
+// 初始化时获取配置
+status = rm_get_gpu_fb_size(sp, nv, &fb_size);    // 获取显存大小
+status = rm_get_gpu_bar1_size(sp, nv, &bar1_size); // 获取BAR1大小
+
+// 配置映射管理器
+mgr->config.fb_size = fb_size;
+mgr->config.bar1_size = bar1_size;
+mgr->config.mode = nv_select_map_mode(fb_size, bar1_size);
+```
+
+### 映射实现
+1. 静态映射
+```c
+// 静态映射实现
+static NV_STATUS nv_static_map(nv_segment_mgr_t *mgr,
+                              uint64_t fb_addr,
+                              uint64_t size,
+                              uint64_t *bar1_addr)
+{
+    nv_dma_device_t dma_dev = {{ 0 }};
+    void *priv = NULL;
+
+    // 直接进行BAR1映射
+    *bar1_addr = fb_addr;
+    return nv_dma_map_pages(&dma_dev, 1, bar1_addr, NV_TRUE,
+                           NV_MEMORY_UNCACHED, &priv);
 }
 
-// 段大小计算
-static inline uint64_t calc_segment_size(uint64_t size) {
-    return RM_ALIGN_UP(size, GPU_PAGE_SIZE);
-}
+// 映射器配置
+struct nv_map_config {
+    uint64_t    fb_size;        // 显存大小
+    uint64_t    bar1_size;      // BAR1大小
+    nv_map_mode_t mode;         // 映射模式
+    struct {
+        atomic64_t static_maps;  // 静态映射次数
+        atomic64_t segment_maps; // 分段映射次数
+        atomic64_t switches;     // 模式切换次数
+    } stats;
+};
 ```
 
 2. GMMU配置
@@ -278,6 +317,51 @@ struct DiagnosticInfo {
         char errorMsg[256];
     } error;
 };
+```
+
+## 自动切换机制
+### 实现架构
+1. 模式定义
+```c
+// 映射模式
+typedef enum {
+    NV_MAP_MODE_STATIC = 0,     // 静态映射模式
+    NV_MAP_MODE_SEGMENT,        // 分段映射模式
+} nv_map_mode_t;
+
+// 映射配置
+typedef struct nv_map_config {
+    uint64_t    fb_size;        // 显存大小
+    uint64_t    bar1_size;      // BAR1大小
+    nv_map_mode_t mode;         // 映射模式
+} nv_map_config_t;
+```
+
+2. 模式选择
+```c
+// 自动选择映射模式
+static nv_map_mode_t nv_select_map_mode(uint64_t fb_size, uint64_t bar1_size)
+{
+    // 根据BAR1和显存大小选择模式
+    if (bar1_size >= fb_size)
+        return NV_MAP_MODE_STATIC;
+    return NV_MAP_MODE_SEGMENT;
+}
+```
+
+3. 动态切换
+```c
+// 映射前检查模式
+nv_map_mode_t current_mode = mgr->config.mode;
+mgr->config.mode = nv_select_map_mode(mgr->config.fb_size, 
+                                     mgr->config.bar1_size);
+
+if (current_mode != mgr->config.mode)
+    atomic64_inc(&mgr->stats.mode_switches);
+
+// 根据模式执行映射
+if (mgr->config.mode == NV_MAP_MODE_STATIC)
+    return nv_static_map(mgr, fb_addr, size, bar1_addr);
 ```
 
 ## 实现注意事项
